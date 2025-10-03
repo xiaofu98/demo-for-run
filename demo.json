@@ -1,0 +1,74 @@
+{
+    "user": {
+        "id": 12345,
+        "name": "Fynn",
+        "roles": ["admin", "editor"],
+        "profile": {
+            "email": "fynn@example.com",
+            "phone": "+1234567890",
+            "address": {
+                "street": "123 Main St",
+                "city": "Metropolis",
+                "zip": "54321",
+                "country": "Wonderland"
+            }
+        }
+    },
+    "settings": {
+        "theme": "dark",
+        "notifications": {
+            "email": true,
+            "sms": false,
+            "push": {
+                "enabled": true,
+                "sound": "chime"
+            }
+        },
+        "privacy": {
+            "tracking": false,
+            "ads": {
+                "personalized": true,
+                "frequency": "low"
+            }
+        }
+    },
+    "projects": [
+        {
+            "id": "p001",
+            "name": "Demo Project",
+            "status": "active",
+            "members": [
+                {"id": 12345, "role": "owner"},
+                {"id": 67890, "role": "contributor"}
+            ],
+            "tasks": [
+                {
+                    "taskId": "t001",
+                    "title": "Setup environment",
+                    "completed": true,
+                    "dueDate": "2024-06-15"
+                },
+                {
+                    "taskId": "t002",
+                    "title": "Implement feature X",
+                    "completed": false,
+                    "dueDate": "2024-06-20"
+                }
+            ]
+        },
+        {
+            "id": "p002",
+            "name": "Test Project",
+            "status": "archived",
+            "members": [
+                {"id": 54321, "role": "viewer"}
+            ],
+            "tasks": []
+        }
+    ],
+    "logs": [
+        {"timestamp": "2024-06-10T10:00:00Z", "action": "login", "userId": 12345},
+        {"timestamp": "2024-06-10T10:05:00Z", "action": "create_project", "userId": 12345, "projectId": "p001"},
+        {"timestamp": "2024-06-10T10:10:00Z", "action": "add_member", "userId": 12345, "projectId": "p001", "memberId": 67890}
+    ]
+}
