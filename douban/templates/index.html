@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <title>豆瓣电影筛选</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="container py-4">
+
+    <h2 class="mb-4">豆瓣电影筛选</h2>
+
+    <!-- 筛选表单 -->
+    <form method="post" class="row g-3 mb-4">
+        <div class="col-auto">
+            <input type="text" class="form-control" name="tag" placeholder="输入标签 (如: 剧情, 喜剧, 动作)">
+        </div>
+        <div class="col-auto">
+            <input type="number" class="form-control" name="page" placeholder="页码 (0 开始)">
+        </div>
+        <div class="col-auto">
+            <input type="number" step="0.1" class="form-control" name="min_rate" placeholder="最低评分 (如: 7)">
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary">搜索</button>
+        </div>
+    </form>
+
+
+    <!-- 结果展示 -->
+    <div class="row">
+        {% for movie in movies %}
+        <div class="col-md-3 mb-4">
+            <div class="card h-100">
+                <img src="/proxy_image?url={{ movie['cover'] | urlencode }}" alt="{{ movie['title'] }}" width="120">
+                <div class="card-body">
+                    <h6 class="card-title">{{ movie.title }}</h6>
+                    <p class="card-text">评分: {{ movie.rate }}</p>
+                    <a href="{{ movie.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">详情</a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+</body>
+
+</html>
