@@ -1,91 +1,161 @@
-import os
-import requests
-from flask import Flask, request, Response, render_template
+from flask import Flask, jsonify, request, send_file,render_template
 from flask_cors import CORS
-from urllib.parse import unquote, urlparse
+import requests
+import os
+import hashlib
+import time
 
 app = Flask(__name__)
 CORS(app)
-DOUBAN_API = "https://movie.douban.com/j/search_subjects"
 
-headers = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+# 简单内存缓存 { cache_key: (timestamp, data) }
+CACHE = {}
+CACHE_EXPIRE_SECONDS = 3600  # 缓存 1 小时
+
+# 豆瓣API
+API_TAG = "https://movie.douban.com/j/search_subjects"
+
+def get_cache_key(tag, rating, page, keyword):
+    return f"{tag}_{rating}_{page}_{keyword}"
+
+def get_from_cache(key):
+    item = CACHE.get(key)
+    if item:
+        timestamp, data = item
+        if time.time() - timestamp < CACHE_EXPIRE_SECONDS:
+            return data
+        else:
+            del CACHE[key]
+    return None
+
+def save_to_cache(key, data):
+    CACHE[key] = (time.time(), data)
+
+@app.route("/", methods=["GET"])
+def index():
+    # 1. 获取参数
+    tag = request.args.get("tag", "热门")
+    rating = float(request.args.get("rating", 0))
+    page = int(request.args.get("page", 0))  # 当前页码，从 0 开始
+    page_limit = 20  # 每页 20 条
+
+    # 2. 调用豆瓣接口
+    url = API_TAG
+    params = {
+        "type": "movie",
+        "tag": tag,
+        "sort": "recommend",
+        "page_limit": page_limit,
+        "page_start": page * page_limit
+    }
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, params=params, headers=headers)
+    try:
+        movies = r.json().get("subjects", [])
+    except Exception:
+        movies = []
+
+    # 3. 按评分过滤
+    movies = [m for m in movies if float(m.get("rate", 0) or 0) >= rating]
+
+    # 4. 返回模板（或 JSON）
+    return render_template(
+        "index.html",
+        movies=movies,
+        tag=tag,
+        rating=rating,
+        page=page,
+        has_next=len(movies) > 0,
     )
-}
 
-# 缓存目录
-CACHE_DIR = os.path.join("static", "cache")
-os.makedirs(CACHE_DIR, exist_ok=True)
+@app.route("/api/movies")
+def api_movies():
+    """异步分页接口，支持 tag 和 keyword 搜索"""
+    tag = request.args.get("tag", "热门")
+    rating = float(request.args.get("rating", 0))
+    page = int(request.args.get("page", 0))
+    keyword = request.args.get("keyword", "").strip()
+    page_limit = 20
+
+    cache_key = get_cache_key(tag, rating, page, keyword)
+    cached = get_from_cache(cache_key)
+    if cached:
+        return jsonify({"from_cache": True, **cached})
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    # 豆瓣标签筛选 API
+    url = API_TAG
+    params = {
+        "type": "movie",
+        "tag": tag,
+        "sort": "recommend",
+        "page_limit": page_limit,
+        "page_start": page * page_limit
+    }
+    try:
+        print(url)
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        data = resp.json()
+        # API 格式兼容
+        if "subjects" in data:
+            movies = data["subjects"]
+        elif "items" in data:  # 搜索结果格式不同
+            movies = [
+                {
+                    "title": m.get("title"),
+                    "rate": m.get("rating", {}).get("value", 0),
+                    "cover": m.get("cover_url"),
+                    "url": m.get("url"),
+                }
+                for m in data["items"]
+            ]
+        else:
+            movies = []
+    except Exception as e:
+        print("API Error:", e)
+        movies = []
+
+    # 评分过滤
+    movies = [m for m in movies if float(m.get("rate", 0) or 0) >= rating]
+
+    result = {
+        "page": page,
+        "movies": movies,
+        "has_next": len(movies) > 0
+    }
+
+    save_to_cache(cache_key, result)
+    return jsonify(result)
+
 
 @app.route("/proxy_image")
 def proxy_image():
-    url = request.args.get("url")
-    if not url:
-        return "Missing url", 400
+    """图片代理 + 本地缓存"""
+    image_url = request.args.get("url")
+    if not image_url:
+        return "Missing URL", 400
 
-    # 解码 URL
-    url = unquote(url)
+    cache_dir = "cache_images"
+    os.makedirs(cache_dir, exist_ok=True)
+    filename = hashlib.md5(image_url.encode()).hexdigest() + ".jpg"
+    filepath = os.path.join(cache_dir, filename)
 
-    # 取 URL 最后的文件名作为缓存名
-    filename = os.path.basename(urlparse(url).path)
-    cache_path = os.path.join(CACHE_DIR, filename)
-
-    # 如果缓存存在，直接返回
-    if os.path.exists(cache_path):
-        with open(cache_path, "rb") as f:
-            return Response(f.read(), content_type="image/jpeg")
+    if os.path.exists(filepath):
+        return send_file(filepath, mimetype="image/jpeg")
 
     try:
-        r = requests.get(url, stream=True, headers=headers, timeout=10)
-        r.raise_for_status()
-
-        # 保存到本地缓存
-        with open(cache_path, "wb") as f:
-            f.write(r.content)
-
-        return Response(r.content, content_type=r.headers.get("Content-Type", "image/jpeg"))
+        r = requests.get(image_url, timeout=10)
+        if r.status_code == 200:
+            with open(filepath, "wb") as f:
+                f.write(r.content)
+            return send_file(filepath, mimetype="image/jpeg")
+        else:
+            return "Image download failed", 500
     except Exception as e:
-        return f"Error fetching image: {e}", 500
+        print("Proxy Error:", e)
+        return "Proxy Error", 500
 
-
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    movies = []
-    if request.method == "POST":
-        tag = request.form.get("tag", "热门")
-        page_str = request.form.get("page", "").strip()
-        min_rate_str = request.form.get("min_rate", "").strip()
-
-        # 页码默认 0
-        page = int(page_str) if page_str.isdigit() else 0
-        # 评分下限默认 0
-        try:
-            min_rate = float(min_rate_str) if min_rate_str else 0
-        except ValueError:
-            min_rate = 0
-
-        params = {
-            "type": "movie",
-            "tag": tag,
-            "page_limit": 20,
-            "page_start": page * 20,
-        }
-        try:
-            resp = requests.get(DOUBAN_API, params=params, headers=headers, timeout=5)
-            # print(resp.text[:200])
-            data = resp.json()
-            movies = data.get("subjects", [])
-            # pprint.pprint(movies)
-            # 过滤评分
-            movies = [m for m in movies if m.get("rate") and float(m["rate"]) >= min_rate]
-        except Exception as e:
-            print("API Error:", e)
-
-    return render_template("index.html", movies=movies)
 
 if __name__ == "__main__":
     app.run(debug=True)
